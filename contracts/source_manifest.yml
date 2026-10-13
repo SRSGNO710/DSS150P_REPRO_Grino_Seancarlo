@@ -1,0 +1,52 @@
+# Source manifest — the identity card of the one permitted input file.
+# The pipeline refuses to ingest a file whose checksum or shape differs from this
+# manifest (task `ingest_source`, check `source_identity`).
+manifest_version: 1
+dataset:
+  name: world_air_quality
+  title: World Air Quality (OpenAQ network aggregation)
+  description: >
+    Snapshot of the latest reading per (location, pollutant) from the OpenAQ
+    open air-quality network, aggregated across ~130 countries. One row per
+    reading; semicolon-delimited. Used by the original DSS group project
+    "Predicting PM2.5 Air Quality Exceedances Using Machine Learning: A
+    Co-Pollutant Chemistry Approach" (Grino, Perez, Valerio).
+  publisher_page: https://www.kaggle.com/datasets/joebeachcapital/world-air-quality
+  upstream_origin: OpenAQ (https://openaq.org) — measurements contributed by government and research monitoring networks
+  acquired_from: Group project archive `Predictive_Final_Project_Code.zip` (the exact file the original notebook read; originally downloaded from the publisher page)
+  snapshot_coverage: "Last Updated values range from 2014-03-13 to 2024-03-25 (about 89% of rows fall in 2021-2024)"
+
+file:
+  name: world_air_quality.csv
+  expected_location: data/source/world_air_quality.csv   # relative to repo root
+  sha256: 2b2202a0fa1cffdeddf803e54dd7f822812d86de3a6449c03798bb872b272f10
+  md5: ba5d8e436e26333d79df067e8a28f7bc
+  size_bytes: 6472005
+  encoding: utf-8-sig        # UTF-8 with byte-order mark
+  line_terminator: CRLF
+  delimiter: ";"
+  header_row: true
+  data_rows: 54255
+  columns: 10
+
+license_and_privacy:
+  license: >
+    NOT STATED on the Kaggle page. Upstream OpenAQ data is published openly by
+    the contributing agencies, but because the redistribution licence of this
+    particular Kaggle export could not be verified, the file is NOT committed
+    to this repository. It is referenced by checksum and must be obtained from
+    the publisher page (or the course project archive) and placed at
+    `file.expected_location`.
+  attribution: "OpenAQ and the contributing monitoring networks; Kaggle dataset 'World Air Quality'."
+  personal_data: >
+    None. Rows describe monitoring stations (station name/address, coordinates)
+    and pollutant concentrations. Station addresses are public infrastructure
+    locations, not individuals.
+  sensitivity: public / non-regulated
+
+refresh_policy:
+  type: static_snapshot
+  note: >
+    The file is a one-off snapshot. "Freshness" is verified as *source identity*
+    (checksum + row count), not as recency — the pipeline does not pretend the
+    file is continuously updated.

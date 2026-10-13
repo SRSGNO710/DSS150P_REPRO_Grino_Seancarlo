@@ -1,0 +1,37 @@
+# --- Secrets / local config -------------------------------------------------
+.env
+*.env.local
+
+# --- Data: source file is referenced by checksum, never committed -----------
+# (see contracts/source_manifest.yml). Generated layers are rebuilt by the
+# pipeline and must not be committed either.
+data/**
+!data/**/
+!data/README.md
+!data/**/.gitkeep
+
+# --- Logs / generated outputs -------------------------------------------------
+logs/*
+!logs/.gitkeep
+!logs/airflow/
+logs/airflow/*
+!logs/airflow/.gitkeep
+
+# --- Airflow runtime (task logs are written to logs/airflow/) -------------------
+airflow-webserver.pid
+standalone_admin_password.txt
+
+# --- Python -------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+.ipynb_checkpoints/
+
+# --- OS / editor --------------------------------------------------------------
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

@@ -1,0 +1,137 @@
+{
+  "description": "Baseline for reproducibility_check. Values under `historical` are parsed from the outputs saved in the archived notebook (= the paper's Tables I and II). The split fingerprint comes from executing the archived notebook verbatim (scripts/notebook_reference.py).",
+  "source_notebook": "notebooks/original/Predictive_Final_Project_code.ipynb",
+  "source_notebook_sha256": "4835edb1464eaef8696b2bf3231d8b8ef1c23f610c25dd4735d7f88f739cd0da",
+  "seed": 42,
+  "imputation_fit_scope": "full",
+  "primary_metric": "test.f1_weighted",
+  "secondary_metrics": [
+    "test.accuracy",
+    "test.precision_weighted",
+    "test.recall_weighted",
+    "cv_f1_weighted.mean"
+  ],
+  "paper_reported": {
+    "true_safe_correct": {
+      "logistic_regression": 98,
+      "random_forest": 146,
+      "gradient_boosting": 141
+    },
+    "note": "Paper \u00a7IV-B: correctly predicted Safe cases (confusion-matrix cell [Safe, Safe]) out of 223."
+  },
+  "historical": {
+    "counts": {
+      "source": 54255,
+      "staging": 30545,
+      "curated": 11558,
+      "model_features": 2628,
+      "train": 2102,
+      "test": 526
+    },
+    "class_balance": {
+      "Unhealthy": 1513,
+      "Safe": 1115
+    },
+    "models": {
+      "logistic_regression": {
+        "display_name": "Logistic Regression",
+        "test": {
+          "accuracy": 0.673004,
+          "precision_weighted": 0.673589,
+          "recall_weighted": 0.673004,
+          "f1_weighted": 0.656994
+        },
+        "cv_f1_weighted": {
+          "mean": 0.672786,
+          "std": 0.023194
+        }
+      },
+      "random_forest": {
+        "display_name": "Random Forest",
+        "test": {
+          "accuracy": 0.71673,
+          "precision_weighted": 0.715967,
+          "recall_weighted": 0.71673,
+          "f1_weighted": 0.716283
+        },
+        "cv_f1_weighted": {
+          "mean": 0.707718,
+          "std": 0.008398
+        },
+        "feature_importances": {
+          "O3": 0.183439,
+          "Ox_total_oxidant": 0.180247,
+          "NO2_O3_ratio": 0.179825,
+          "CO": 0.157234,
+          "NO2": 0.15703,
+          "SO2": 0.120666,
+          "CO_missing": 0.012007,
+          "SO2_missing": 0.009552
+        }
+      },
+      "gradient_boosting": {
+        "display_name": "Gradient Boosting",
+        "test": {
+          "accuracy": 0.705323,
+          "precision_weighted": 0.703983,
+          "recall_weighted": 0.705323,
+          "f1_weighted": 0.704445
+        },
+        "cv_f1_weighted": {
+          "mean": 0.71221,
+          "std": 0.006402
+        }
+      }
+    },
+    "best_model_by_cv_f1": "gradient_boosting",
+    "python_version_recorded_in_notebook": "3.13.9"
+  },
+  "split_fingerprint": {
+    "train_keys_sha256": "c004b47cd002837fc11076c0c12d0ae254aa670e46d280a31640a7e87d23e275",
+    "test_keys_sha256": "9b330835238f79669013bb34ef8faff1000abd94b77ffccdec0f99c38182106a"
+  },
+  "reference_execution": {
+    "environment": {
+      "python": "3.13.16",
+      "pandas": "3.0.5",
+      "numpy": "2.5.3",
+      "scikit-learn": "1.9.1"
+    },
+    "split": {
+      "train_keys_sha256": "c004b47cd002837fc11076c0c12d0ae254aa670e46d280a31640a7e87d23e275",
+      "test_keys_sha256": "9b330835238f79669013bb34ef8faff1000abd94b77ffccdec0f99c38182106a"
+    },
+    "models": {
+      "logistic_regression": {
+        "test": {
+          "accuracy": 0.6730038022813688,
+          "f1_weighted": 0.6569938339815483
+        },
+        "cv_f1_weighted": {
+          "mean": 0.6727856091164817,
+          "std": 0.023193714695064132
+        }
+      },
+      "random_forest": {
+        "test": {
+          "accuracy": 0.7167300380228137,
+          "f1_weighted": 0.7162832416337103
+        },
+        "cv_f1_weighted": {
+          "mean": 0.7077183427542177,
+          "std": 0.008397589473863345
+        }
+      },
+      "gradient_boosting": {
+        "test": {
+          "accuracy": 0.7053231939163498,
+          "f1_weighted": 0.7044449363149173
+        },
+        "cv_f1_weighted": {
+          "mean": 0.7118139388398368,
+          "std": 0.0061518453510209774
+        }
+      }
+    }
+  }
+}

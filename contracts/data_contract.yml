@@ -1,0 +1,145 @@
+# Data contract — machine-readable and ENFORCED by src/pipeline/quality.py.
+# YAML note: codes such as NO must be quoted ("NO"), otherwise YAML 1.1 parses them as booleans.
+# Every check below is executed by the pipeline; nothing here is documentation-only.
+#
+# Behaviour on violation (applies to every check):
+#   severity: error -> the check result is recorded (JSON report + audit.dq_results),
+#                      a DataQualityError is raised, the task FAILS, and no
+#                      downstream task runs. Run-scoped outputs of a failed run are
+#                      never promoted to data/outputs/latest (see publish_outputs).
+#   severity: warn  -> the result is recorded and logged at WARNING; the run continues.
+#   applies_when: complete_source -> exact row-count checks are only evaluated when
+#                      the raw layer holds every source row (full mode, or the last
+#                      incremental batch). Otherwise they are recorded as "skipped".
+contract_version: 1
+dataset: world_air_quality
+owner: Bienn Jaime Perez (DSS150P)
+
+layers:
+  # ---------------------------------------------------------------- RAW --------
+  raw:
+    description: >
+      Lossless landing copy of the source. Every source field is stored as the
+      exact string read from the file (no NA conversion, no type casting) plus
+      lineage/audit columns. Append-only, one Parquet file per ingest batch.
+    business_key: [_source_sha256, _source_row_number]
+    columns:
+      Country Code:   {type: string, nullable: false}
+      City:           {type: string, nullable: true}      # empty string = missing
+      Location:       {type: string, nullable: false}
+      Coordinates:    {type: string, nullable: true, format: "lat, lon"}
+      Pollutant:      {type: string, nullable: false}
+      Source Name:    {type: string, nullable: false}
+      Unit:           {type: string, nullable: false}
+      Value:          {type: string, nullable: false, parse_as: float}
+      Last Updated:   {type: string, nullable: false, parse_as: datetime_iso8601_offset}
+      Country Label:  {type: string, nullable: true}
+      _source_row_number: {type: int,    nullable: false, description: "1-based data-row position in the source file"}
+      _source_file:       {type: string, nullable: false}
+      _source_sha256:     {type: string, nullable: false}
+      _record_hash:       {type: string, nullable: false, description: "sha256 of the 10 source fields"}
+      _ingest_batch_id:   {type: string, nullable: false}
+      _pipeline_run_id:   {type: string, nullable: false}
+      _ingested_at:       {type: string, nullable: false, description: "UTC ISO-8601 audit timestamp (pipeline time, NOT a business timestamp)"}
+    checks:
+      - {id: raw_schema_required_columns, category: schema, type: required_columns, severity: error,
+         columns: ["Country Code", City, Location, Coordinates, Pollutant, "Source Name", Unit, Value, "Last Updated", "Country Label"]}
+      - {id: raw_value_parseable, category: schema, type: parseable, column: Value, parse_as: float, max_failure_fraction: 0.0, severity: error}
+      - {id: raw_timestamp_parseable, category: schema, type: parseable, column: Last Updated, parse_as: datetime, max_failure_fraction: 0.0, severity: error}
+      - {id: raw_critical_not_null, category: completeness, type: not_null, severity: error,
+         columns: [Pollutant, Value, Unit, "Last Updated", "Country Code"], max_null_fraction: 0.0}
+      - {id: raw_location_completeness, category: completeness, type: not_null, column: Location, max_null_fraction: 0.001, severity: warn}
+      - {id: raw_business_key_unique, category: uniqueness, type: unique, columns: [_source_sha256, _source_row_number], severity: error}
+      - {id: raw_pollutant_codes_known, category: validity, type: accepted_values, column: Pollutant, severity: warn,
+         values: [NO2, PM2.5, O3, PM10, SO2, CO, "NO", NOX, BC, PM1, TEMPERATURE, RELATIVEHUMIDITY, UM003]}
+      - {id: raw_source_checksum_matches_manifest, category: freshness, type: source_checksum, severity: error}
+      - {id: raw_row_count_matches_manifest, category: freshness, type: row_count, equals_manifest: true, severity: error, applies_when: complete_source}
+
+  # ------------------------------------------------------------ STAGING --------
+  staging:
+    description: >
+      Typed, conformed, one row per valid reading of the six study pollutants.
+      Applies the notebook's cleaning rules in the notebook's order (see
+      docs/reproducibility_report.md §3).
+    business_key: [location, pollutant, last_updated_utc]
+    columns:
+      reading_key:       {type: string, nullable: false}
+      country_code:      {type: string, nullable: false}
+      country_label:     {type: string, nullable: false}
+      city:              {type: string, nullable: false}
+      location:          {type: string, nullable: false}
+      latitude:          {type: float,  nullable: true}
+      longitude:         {type: float,  nullable: true}
+      pollutant:         {type: string, nullable: false}
+      source_name:       {type: string, nullable: false}
+      unit:              {type: string, nullable: false}
+      value:             {type: float,  nullable: false}
+      last_updated_utc:  {type: datetime, nullable: false}
+      reading_date:      {type: date,   nullable: false}
+      _source_row_number: {type: int,   nullable: false}
+      _pipeline_run_id:   {type: string, nullable: false}
+    checks:
+      - {id: stg_schema_required_columns, category: schema, type: required_columns, severity: error,
+         columns: [reading_key, country_label, city, location, pollutant, unit, value, last_updated_utc, reading_date]}
+      - {id: stg_no_nulls_critical, category: completeness, type: not_null, severity: error,
+         columns: [country_label, city, location, pollutant, unit, value, last_updated_utc], max_null_fraction: 0.0}
+      - {id: stg_reading_key_unique, category: uniqueness, type: unique, columns: [location, pollutant, last_updated_utc], severity: error}
+      - {id: stg_pollutant_in_scope, category: validity, type: accepted_values, column: pollutant, values: [PM2.5, PM10, NO2, O3, SO2, CO], severity: error}
+      - {id: stg_unit_is_ugm3, category: validity, type: accepted_values, column: unit, values: ["µg/m³"], severity: error}
+      - {id: stg_value_non_negative, category: validity, type: range, column: value, min: 0, severity: error}
+      - {id: stg_row_count_baseline, category: reproducibility, type: row_count, equals: 30545, severity: error, applies_when: complete_source}
+
+  # ------------------------------------------------------------ CURATED --------
+  curated:
+    description: >
+      Data product: one row per station-day (country_label, city, location,
+      reading_date) with the daily mean of each of the six pollutants.
+      Pollutant columns are NULL where the station did not report that pollutant.
+    business_key: [country_label, city, location, reading_date]
+    columns:
+      station_day_key: {type: string, nullable: false}
+      country_label:   {type: string, nullable: false}
+      city:            {type: string, nullable: false}
+      location:        {type: string, nullable: false}
+      reading_date:    {type: date,   nullable: false}
+      co:    {type: float, nullable: true}
+      no2:   {type: float, nullable: true}
+      o3:    {type: float, nullable: true}
+      pm10:  {type: float, nullable: true}
+      pm25:  {type: float, nullable: true}
+      so2:   {type: float, nullable: true}
+      n_readings: {type: int, nullable: false}
+      _pipeline_run_id: {type: string, nullable: false}
+    checks:
+      - {id: cur_schema_required_columns, category: schema, type: required_columns, severity: error,
+         columns: [station_day_key, country_label, city, location, reading_date, co, no2, o3, pm10, pm25, so2]}
+      - {id: cur_station_day_key_unique, category: uniqueness, type: unique, columns: [country_label, city, location, reading_date], severity: error}
+      - {id: cur_at_least_one_pollutant, category: completeness, type: custom, rule: at_least_one_pollutant, severity: error}
+      - {id: cur_pm25_range, category: validity, type: range, column: pm25, min: 0, max: 2000, severity: error}
+      - {id: cur_pm25_le_pm10, category: consistency, type: custom, rule: pm25_not_greater_than_pm10, max_violation_fraction: 0.10, severity: warn}
+      - {id: cur_row_count_baseline, category: reproducibility, type: row_count, equals: 11558, severity: error, applies_when: complete_source}
+
+  # ----------------------------------------------------- MODEL FEATURES --------
+  model_features:
+    description: >
+      Model-ready dataset: curated station-days with PM2.5, NO2 and O3 all present,
+      SO2/CO median-imputed with missingness flags, two engineered chemistry
+      features and the WHO-threshold label.
+    business_key: [station_day_key]
+    feature_columns: [NO2, O3, SO2, CO, SO2_missing, CO_missing, Ox_total_oxidant, NO2_O3_ratio]   # order is part of the contract
+    target_source_column: PM2.5
+    label_column: Air_Quality
+    label_rule: {threshold: 15.0, above: Unhealthy, at_or_below: Safe}
+    forbidden_feature_columns: [PM2.5, PM10, pm25, pm10, Air_Quality]   # leakage guard
+    checks:
+      - {id: mf_schema_feature_order, category: predictive_integrity, type: custom, rule: feature_columns_and_order, severity: error}
+      - {id: mf_no_nulls, category: completeness, type: not_null, severity: error,
+         columns: [NO2, O3, SO2, CO, SO2_missing, CO_missing, Ox_total_oxidant, NO2_O3_ratio, PM2.5, Air_Quality], max_null_fraction: 0.0}
+      - {id: mf_key_unique, category: uniqueness, type: unique, columns: [station_day_key], severity: error}
+      - {id: mf_label_values, category: validity, type: accepted_values, column: Air_Quality, values: [Safe, Unhealthy], severity: error}
+      - {id: mf_missing_flags_binary, category: validity, type: accepted_values, column: SO2_missing, values: [0, 1], severity: error}
+      - {id: mf_ox_equals_sum, category: consistency, type: custom, rule: ox_total_equals_no2_plus_o3, severity: error}
+      - {id: mf_label_matches_who_rule, category: business_rule, type: custom, rule: label_matches_who_threshold, severity: error}
+      - {id: mf_no_leakage_features, category: predictive_integrity, type: custom, rule: no_forbidden_features, severity: error}
+      - {id: mf_class_balance, category: business_rule, type: custom, rule: class_balance_within_bounds, min_minority_fraction: 0.30, severity: warn}
+      - {id: mf_row_count_baseline, category: reproducibility, type: row_count, equals: 2628, severity: error, applies_when: complete_source}

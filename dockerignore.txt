@@ -1,0 +1,11 @@
+.git
+.env
+.venv
+venv
+data
+logs
+airflow/logs
+**/__pycache__
+.pytest_cache
+notebooks
+docs

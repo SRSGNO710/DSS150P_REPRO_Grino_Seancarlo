@@ -1,0 +1,139 @@
+# Local stack: PostgreSQL warehouse + Apache Airflow (LocalExecutor) + a pipeline
+# tools container. All credentials come from `.env` (copy .env.example); compose
+# refuses to start if a required variable is missing.
+#
+#   docker compose up -d --build            # warehouse + airflow (UI http://localhost:8080)
+#   docker compose run --rm pipeline ...    # run CLI commands / tests in the pipeline image
+#
+# The whole repository is bind-mounted at /opt/project, so data/, logs/ and
+# outputs written inside containers appear in your working copy.
+
+x-airflow-common: &airflow-common
+  build:
+    context: .
+    dockerfile: docker/airflow/Dockerfile
+  image: dss150p-airflow:2.10.5
+  user: "${AIRFLOW_UID:-50000}:0"
+  environment: &airflow-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:${AIRFLOW_DB_PASSWORD:?set AIRFLOW_DB_PASSWORD in .env}@airflow-db:5432/airflow
+    AIRFLOW__CORE__DAGS_FOLDER: /opt/project/dags
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+    AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY:?set AIRFLOW_SECRET_KEY in .env}
+    AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL: "30"
+    PIPELINE_HOME: /opt/project
+    POSTGRES_HOST: warehouse
+    POSTGRES_PORT: "5432"
+    POSTGRES_DB: ${POSTGRES_DB:-airquality}
+    POSTGRES_USER: ${POSTGRES_USER:-pipeline}
+    POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+  volumes:
+    - ./:/opt/project
+    - ./logs/airflow:/opt/airflow/logs
+  depends_on: &airflow-depends
+    airflow-db:
+      condition: service_healthy
+    warehouse:
+      condition: service_healthy
+
+services:
+  # ---------------------------------------------------------------- warehouse --
+  warehouse:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-airquality}
+      POSTGRES_USER: ${POSTGRES_USER:-pipeline}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    ports:
+      - "${WAREHOUSE_HOST_PORT:-5433}:5432"   # host 5433 avoids clashing with a local PostgreSQL
+    volumes:
+      - warehouse-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  # ------------------------------------------------------- airflow metadata DB --
+  airflow-db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: airflow
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: ${AIRFLOW_DB_PASSWORD:?set AIRFLOW_DB_PASSWORD in .env}
+    volumes:
+      - airflow-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow -d airflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  # ------------------------------------------------------------------ airflow --
+  airflow-init:
+    <<: *airflow-common
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        mkdir -p /opt/airflow/logs &&
+        airflow db migrate &&
+        airflow users create --role Admin --username "$${AIRFLOW_ADMIN_USER}" --password "$${AIRFLOW_ADMIN_PASSWORD}" \
+          --firstname Admin --lastname User --email admin@example.org || true
+    environment:
+      <<: *airflow-env
+      AIRFLOW_ADMIN_USER: ${AIRFLOW_ADMIN_USER:-admin}
+      AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:?set AIRFLOW_ADMIN_PASSWORD in .env}
+    restart: "no"
+
+  airflow-webserver:
+    <<: *airflow-common
+    command: webserver
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    depends_on:
+      <<: *airflow-depends
+      airflow-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    depends_on:
+      <<: *airflow-depends
+      airflow-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # ---------------------------------------------------------- pipeline tools --
+  pipeline:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: dss150p-pipeline:1.0
+    profiles: ["tools"]          # not started by `up`; use `docker compose run --rm pipeline ...`
+    environment:
+      PIPELINE_HOME: /opt/project
+      POSTGRES_HOST: warehouse
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: ${POSTGRES_DB:-airquality}
+      POSTGRES_USER: ${POSTGRES_USER:-pipeline}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - ./:/opt/project
+    depends_on:
+      warehouse:
+        condition: service_healthy
+
+volumes:
+  warehouse-data:
+  airflow-db-data:

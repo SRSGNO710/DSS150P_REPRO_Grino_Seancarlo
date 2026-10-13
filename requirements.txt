@@ -1,0 +1,11 @@
+# Pipeline runtime dependencies — pinned for reproducibility.
+# Target interpreter: Python 3.12 (same as the Airflow image and the pipeline image).
+# These are the library versions current when the original notebook was run
+# (Python 3.13.9, Oct 2025); see docs/reproducibility_report.md §5.
+numpy==2.3.3
+pandas==2.3.3
+scikit-learn==1.7.2
+pyarrow==21.0.0
+psycopg2-binary==2.9.10
+PyYAML==6.0.2
+matplotlib==3.10.6

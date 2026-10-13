@@ -1,0 +1,4 @@
+-r requirements.txt
+pytest==8.4.2
+# only for scripts/notebook_reference.py (re-executes the original notebook, which imports seaborn)
+seaborn==0.13.2

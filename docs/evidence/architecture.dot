@@ -1,0 +1,63 @@
+// Architecture: components and data movement. Render: dot -Tpng -Gdpi=160 architecture.dot -o ../architecture.png
+digraph architecture {
+  graph [rankdir=LR, fontname="Helvetica", fontsize=12, pad=0.3, nodesep=0.35, ranksep=0.6, bgcolor="white",
+         label="DSS150P — PM2.5 exceedance pipeline: architecture and data movement", labelloc=t, fontsize=16];
+  node  [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=10, color="#5b6b7f", fillcolor="#f4f6f9"];
+  edge  [fontname="Helvetica", fontsize=9, color="#5b6b7f"];
+
+  subgraph cluster_inputs {
+    label="Inputs (repository + operator)"; style="rounded,dashed"; color="#9aa5b1"; fontsize=11;
+    src      [label="data/source/world_air_quality.csv\n(obtained by operator; not committed)", fillcolor="#fff4e0", color="#c98a1b"];
+    manifest [label="contracts/source_manifest.yml\n(sha256, size, rows, licence)"];
+    contract [label="contracts/data_contract.yml\n(schema + DQ rules, severities)"];
+    config   [label="config/pipeline.yml + .env\n(paths, params, credentials)"];
+    baseline [label="expected/baseline_metrics.json\n(from archived notebook)"];
+  }
+
+  subgraph cluster_compose {
+    label="Docker Compose stack"; style="rounded"; color="#2f6db5"; fontsize=11;
+    subgraph cluster_airflow {
+      label="Apache Airflow 2.10.5 (LocalExecutor)"; style="rounded,filled"; fillcolor="#eaf2fb"; color="#2f6db5";
+      web   [label="airflow-webserver\n:8080 (UI, trigger, params)"];
+      sched [label="airflow-scheduler\nDAG air_quality_pm25_pipeline\n10 BashOperator tasks"];
+      afdb  [label="airflow-db\n(PostgreSQL 16, metadata)", shape=cylinder];
+    }
+    subgraph cluster_pipeline {
+      label="Pipeline package (src/pipeline) — /opt/pipeline-venv, pinned deps"; style="rounded,filled"; fillcolor="#eef7ee"; color="#3d8b3d";
+      cli   [label="pipeline.cli run-stage <stage>\n(shared by Airflow and run-all)"];
+      mods  [label="ingest · quality · transform · features\nmodel · reproducibility · db · partition\nstorage_benchmark · logging · run_record", shape=component];
+    }
+    wh [label="warehouse (PostgreSQL 16)\nstaging.air_quality_readings\ncurated.station_day_pollutants\nml.predictions · ml.model_metrics\naudit.pipeline_runs/task_runs/load_log/dq_results", shape=cylinder, fillcolor="#e8f0fe", color="#2f6db5"];
+    tools [label="pipeline (tools profile)\npytest · scripts · benchmark", fillcolor="#f4f6f9"];
+  }
+
+  subgraph cluster_files {
+    label="Bind-mounted working copy: data/ and logs/ (git-ignored)"; style="rounded,filled"; fillcolor="#fbfbf3"; color="#a39e5a"; fontsize=11;
+    raw   [label="raw/_pending → raw/committed\n(+ checkpoint, quarantine)", shape=folder];
+    stg   [label="staging/air_quality_readings\n(Parquet)", shape=folder];
+    cur   [label="curated/station_day_pollutants\n+ partitions/country_label=*", shape=folder];
+    feat  [label="features/model_features", shape=folder];
+    runs  [label="outputs/runs/<run_id>/\nmodels, split, metrics.json,\npredictions.csv, dq_report, run_summary", shape=folder];
+    latest[label="outputs/latest/\n(promoted only on success)", shape=folder, fillcolor="#e9f7e9"];
+    logs  [label="logs/pipeline_<run_id>.jsonl\nlogs/airflow/ (task logs)", shape=note];
+  }
+
+  web -> sched [label="trigger + params", dir=both, arrowtail=none];
+  sched -> afdb [dir=both, style=dashed, arrowsize=0.6];
+  sched -> cli [label="bash: run-stage\n--run-id {{run_id}}"];
+  tools -> cli [style=dashed, label="run-all / tests"];
+  cli -> mods;
+  config -> mods [style=dotted]; contract -> mods [style=dotted]; manifest -> mods [style=dotted]; baseline -> mods [style=dotted];
+
+  src -> raw  [label="ingest_source\n(checksum)", color="#c98a1b", penwidth=1.6];
+  raw -> stg  [label="validate_raw →\ntransform_staging", color="#3d8b3d", penwidth=1.6];
+  stg -> cur  [label="build_curated", color="#3d8b3d", penwidth=1.6];
+  cur -> feat [color="#3d8b3d", penwidth=1.6];
+  stg -> wh   [label="load_postgres (upsert)", color="#2f6db5", penwidth=1.6];
+  cur -> wh   [color="#2f6db5", penwidth=1.6];
+  feat -> runs [label="train / evaluate /\nreproducibility_check", color="#3d8b3d", penwidth=1.6];
+  runs -> latest [label="publish_outputs", color="#3d8b3d", penwidth=1.6];
+  runs -> wh  [label="predictions, metrics", color="#2f6db5", penwidth=1.6];
+  mods -> logs [style=dashed, label="structured logs"];
+  mods -> wh  [style=dashed, label="audit records"];
+}

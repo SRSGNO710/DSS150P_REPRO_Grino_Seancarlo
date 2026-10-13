@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "airquality-pipeline"
+version = "1.0.0"
+description = "Reproducible data pipeline for PM2.5 exceedance prediction (DSS150P)"
+requires-python = ">=3.11"
+authors = [{ name = "Bienn Jaime Perez" }]
+
+[project.scripts]
+pipeline = "pipeline.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+markers = [
+    "integration: spans more than one module or a file/database boundary",
+    "postgres: needs a reachable PostgreSQL (skipped otherwise)",
+]

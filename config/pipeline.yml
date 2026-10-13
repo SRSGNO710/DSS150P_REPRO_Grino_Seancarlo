@@ -1,0 +1,78 @@
+# Pipeline configuration. All paths are RELATIVE to the repository root
+# (or to $PIPELINE_HOME when set, e.g. /opt/project inside containers).
+# Any value can be overridden with an environment variable; the mapping is
+# listed next to the key (see src/pipeline/config.py).
+
+paths:
+  source_file: data/source/world_air_quality.csv     # PIPELINE_SOURCE_PATH
+  source_manifest: contracts/source_manifest.yml
+  data_contract: contracts/data_contract.yml
+  baseline_metrics: expected/baseline_metrics.json
+  raw_dir: data/raw
+  staging_dir: data/staging
+  curated_dir: data/curated
+  features_dir: data/features
+  outputs_dir: data/outputs
+  checkpoint_file: data/checkpoints/ingest_checkpoint.json
+  quarantine_dir: data/quarantine
+  benchmark_dir: data/benchmark
+  logs_dir: logs
+
+storage:
+  # Format of the staging/curated/feature layers. parquet is the default and
+  # what the Docker images use. csv exists only as a dependency-free fallback.
+  layer_format: parquet                                # PIPELINE_LAYER_FORMAT
+  partition_column: country_label                      # curated partition demo
+
+ingestion:
+  default_mode: full                                   # full | incremental
+  # Incremental mode simulates arrival of the static file in batches of N
+  # source rows. The checkpoint is a SOURCE-ROW high-water mark, not a business
+  # timestamp (the dataset has no load/update timestamp).
+  incremental_batch_rows: 20000                        # PIPELINE_BATCH_ROWS
+
+transform:
+  # Exactly the notebook's cleaning rules (§3.2 / §3.3 of the original notebook).
+  pollutants: [PM2.5, PM10, NO2, O3, SO2, CO]
+  dedup_key: [Location, Pollutant, Last Updated]
+  dedup_keep: first                                    # in source-row order
+  allowed_unit: "µg/m³"
+  min_value: 0.0
+  geo_fill_value: Unknown
+  # Strings that pandas' read_csv treats as missing by default. The original
+  # notebook relied on that implicitly (e.g. 346 cities literally named "N/A");
+  # we apply it explicitly so the behaviour is visible and version-independent.
+  implicit_na_strings: ["", "#N/A", "#N/A N/A", "#NA", "-1.#IND", "-1.#QNAN", "-NaN", "-nan",
+                        "1.#IND", "1.#QNAN", "<NA>", "N/A", "NA", "NULL", "NaN", "None",
+                        "n/a", "nan", "null"]
+
+model:
+  seed: 42                                             # PIPELINE_MODEL_SEED (DAG param model_seed)
+  test_size: 0.2
+  cv_folds: 5
+  who_threshold: 15.0
+  required_predictors: [PM2.5, NO2, O3]
+  impute_columns: [SO2, CO]
+  # full  = median computed on all model-ready rows (exactly as the notebook)
+  # train = median computed on the training split only (stricter; sensitivity run)
+  imputation_fit_scope: full
+  feature_columns: [NO2, O3, SO2, CO, SO2_missing, CO_missing, Ox_total_oxidant, NO2_O3_ratio]
+  models:
+    logistic_regression: {class: LogisticRegression, params: {max_iter: 1000}}
+    random_forest:       {class: RandomForestClassifier, params: {n_estimators: 200}, seeded: true}
+    gradient_boosting:   {class: GradientBoostingClassifier, params: {n_estimators: 200}, seeded: true}
+  deployed_model: random_forest          # the paper's dashboard model (highest test accuracy)
+
+reproducibility:
+  # Primary metric = held-out weighted F1 per model (the paper's Table I),
+  # with accuracy and CV F1 as secondary metrics. See expected/baseline_metrics.json.
+  abs_tolerance: 0.01
+  count_checks_exact: true
+
+postgres:
+  host: localhost            # POSTGRES_HOST
+  port: 5432                 # POSTGRES_PORT
+  dbname: airquality         # POSTGRES_DB
+  user: pipeline             # POSTGRES_USER
+  # password: only from env POSTGRES_PASSWORD — never stored in this file
+  connect_timeout_s: 10
